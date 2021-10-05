@@ -1,0 +1,70 @@
+/*****************************************************************************************************
+-Step 1-
+Establish the CASEIDs of Interest                                                                    
+*****************************************************************************************************/
+data ABCDE;
+input CASEID $ 1-3;
+datalines;
+AAA
+BBB
+run;
+
+/*****************************************************************************************************
+-Step 2-
+Establish the name/position of every variable in the text file.                       
+These observations will be read by the following section to create a macro input state
+*****************************************************************************************************/
+data ABCDE_INPUT;
+input INPUT $ 1-14;
+datalines;
+CASEID $ 1-3
+NAME $ 4-12
+FRUIT $ 13-35
+run;
+
+/*****************************************************************************************************
+-Step 3-
+Establish a global macro input statement.                                                            
+Macroprocessing is required to exceed 64k character limitation on my real data.
+More information on this here: http://support.sas.com/kb/39/605.html 
+*****************************************************************************************************/
+%let input_macro= ;
+%macro input_macro;
+	%let dsid=%sysfunc(open(ABCDE_INPUT));                                                                                                         
+	%let cnt=%sysfunc(attrn(&dsid,nobs));
+	%do i=1 %to &cnt;
+	%let rc=%sysfunc(fetchobs(&dsid,&i));
+	%cmpres(%sysfunc(getvarc(&dsid,%sysfunc(varnum(&dsid,INPUT)))))
+	%end;
+	%let rc=%sysfunc(close(&dsid));                                                                                                        
+%mend input_macro;
+
+/*****************************************************************************************************
+-Step 4-
+Create do-loops with each CASEID from Step 1
+*****************************************************************************************************/
+proc sql noprint;
+	select distinct CASEID into:truthdeck_caseids separated by " "
+	from ABCDE;
+run;
+
+%macro distinct_CASEIDs;
+%local i variable;
+%let i=1;
+%do %while (%scan(&truthdeck_caseids, &i) ne);
+	%let variable = %scan(&truthdeck_caseids, &i);
+
+data FULL_DATA_&variable;
+	infile "text file directory" missover truncover lrecl=25;
+	input CASEID $1-3 @;
+	if CASEID="&variable" then input %input_macro;
+run;
+
+data FULL_DATA_&variable; set FULL_DATA_&variable;
+	if CASEID^="&variable" then delete;
+run;
+
+%let i = %eval(&i + 1);
+%end;
+%mend;
+%distinct_CASEIDs
